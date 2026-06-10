@@ -33,8 +33,8 @@ static const std::complex <float> COMPLEX_ZERO = std::complex <float>(0.0, 0.0);
 static const std::complex <float> COMPLEX_ONE = std::complex <float>(1.0, 0.0);
 static const std::complex <float> COMPLEX_I = std::complex <float>(0.0, 1.0); // Imaginary unit
 
-static const float M_PI = std::acos(-1.0); // Calculate Pi
-static const float M_E = std::exp(1.0); // Calculate Euler's number (e)
+//static const float M_PI = std::acos(-1.0); // Calculate Pi
+//static const float M_E = std::exp(1.0); // Calculate Euler's number (e)
 
 enum {
 	DENSE,

@@ -9,39 +9,51 @@ using namespace std;
 int main(int argc, char **argv){
 	srand(time(NULL));
 
-	int execType = t_CPU, n_threads = 1, cpu_region = 14, cpu_coalesc = 11, multi_gpu = 1, gpu_region = 8, gpu_coalesc = 4, tam_block = 64, rept = 2;
+	int n_threads = 16, cpu_region = 12, cpu_coalesc = 8, multi_gpu = 1, gpu_region = 12, gpu_coalesc = 4, tam_block = 512, rept = 4;
 
-	if (argc < 2){
-		cout << "You need to define the execution parameters" << endl;
-		return 0;
-	}
-
-	int qubits = atoi(argv[1]);
-
-
-  if (argc > 2) {
-    execType = atoi(argv[2]);
-  }
-
-	if (execType < t_CPU || execType > t_HYBRID){
-		cout << "Invalid execution type: " << execType << endl; 
-		return 0;
-	}
-
-	if (execType == t_PAR_CPU) {
-		if (argc > 3) n_threads = atoi(argv[3]);
-	}
-	else if (execType == t_GPU) {
-		if (argc > 3) multi_gpu = atoi(argv[3]);
-	}
-	else if (execType == t_HYBRID) {
-		if (argc > 3) n_threads = atoi(argv[3]);
-	}
+	int num_amostras = 5;
+	int qubits = 31;
+	int execType = t_HYBRID_2;
  
 	int value = 10;
 
-	float t = Grover(qubits, value, t_CPU, n_threads, cpu_region, cpu_coalesc, multi_gpu, gpu_region, gpu_coalesc, tam_block, rept);
- 
-  cout << t << endl;
-	
+	vector < tuple <int, int, vector <float> > > results;
+
+	vector <int> qubits_limit_values = { 23 };
+	vector <int> global_coales_values = { 16 };
+
+	for (auto& qubits_limit: qubits_limit_values) {
+	for (auto& global_coales: global_coales_values) {
+		if (global_coales >= qubits_limit)
+			continue;
+
+		cout << "Qubits Limit: " << qubits_limit << "  -  Global Coales: " << global_coales << endl;
+		vector <float> amostras;
+		for (int a = 0; a < num_amostras; a++) {
+			float t = Grover(qubits, value, execType, n_threads, cpu_region, cpu_coalesc, multi_gpu, gpu_region, gpu_coalesc, tam_block, rept, qubits_limit, global_coales);
+			//Shor(qubitsMap[qubits], execType, n_threads, cpu_region, cpu_coalesc, 1, gpu_region, gpu_coalesc, tam_block, rept, qubits_limit, global_coales);
+
+			cout << a << ": " << t << endl;
+
+			amostras.push_back(t);
+		}
+
+		tuple <int, int, vector <float>> result;
+
+		result = make_tuple(qubits_limit, global_coales, amostras);
+
+		results.push_back(result);
+	}
+	}
+
+	cout << "\nALL RESULTS" << endl;
+
+	for (auto& result: results) {
+		cout << get<0>(result) << " " << get<1>(result);
+		vector<float> amostras = get<2>(result);
+		for (int a = 0; a < num_amostras; a++) {
+			cout << " " << amostras[a];
+		}
+		cout << endl;
+	}	
 }

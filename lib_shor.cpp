@@ -107,7 +107,6 @@ string genRot(int qubits, int reg, long value){
 	std::complex <float> rot = 1;
 
 	long aux = value;
-	aux = aux >> 1;
 	while (aux){
 		if (aux&1) {
 			float exponent = -2 * M_PI / pow(2, k);
@@ -628,7 +627,7 @@ string int2str(int number){
 //N - Number to ne factored
 //type - Execution Type
 //threads - Number of threads to be used in case of a parallel execution on CPU
-vector<int> Shor(long N, int type, int n_threads, int cpu_region, int cpu_coalesc, int multi_gpu, int gpu_region, int gpu_coalesc, int tam_block, int rept){
+vector<int> Shor(long N, int type, int n_threads, int cpu_region, int cpu_coalesc, int multi_gpu, int gpu_region, int gpu_coalesc, int tam_block, int rept, int qubits_limit, int global_coales){
 	long a, n, mod_a, mod_inv_a, aux, m, res;
 
 	int qubits, qft_qb, reg1, reg2, over, over_bool;
@@ -647,6 +646,9 @@ vector<int> Shor(long N, int type, int n_threads, int cpu_region, int cpu_coales
 	dgm.gpu_coales = gpu_coalesc;
 	dgm.tam_block = tam_block;
 	dgm.rept = rept;
+
+	dgm.qubits_limit = qubits_limit;
+	dgm.global_coales = global_coales;
 	//-----------------------------//
 
 	aux = N;
@@ -662,10 +664,6 @@ vector<int> Shor(long N, int type, int n_threads, int cpu_region, int cpu_coales
 	dgm.allocateMemory();
 	dgm.setMemoryValue((1<<(n+2)));
 	//----------------------------------//
-
-	if (!is_valid_quantum_state(dgm.state, qubits)){
-		cout << "Invalid quantum state" << endl;
-	}
 
 	qft_qb = 0;
 	reg1 = 1;
@@ -684,11 +682,15 @@ vector<int> Shor(long N, int type, int n_threads, int cpu_region, int cpu_coales
 	int L = 2*n-1;
 	long inv_a = mul_inv(a,N);
 
-	cout << "a " << a << endl;
-
 	vector <string> func, f;
 
-	for (int i = L; i >= 0; i--){
+	Timer shor_timer;
+	shor_timer.start();
+
+	int skipFactor = L;
+	int L_COUNT = 0;
+	for (int i = L; i >= 0; i-=skipFactor){
+		L_COUNT++;
 		mod_a = modular_pow(a, pow(2,i), N);
 		mod_inv_a = modular_pow(inv_a, pow(2,i), N);
 
@@ -705,31 +707,29 @@ vector<int> Shor(long N, int type, int n_threads, int cpu_region, int cpu_coales
 		f = CRMultMod(qubits, qft_qb, reg1, reg2, over, over_bool, n, mod_a, N);
 		func.insert(func.end(), f.begin(), f.end());
 
-		long rot_base = (res & ~1);
-		if (rot_base) func.push_back(genRot(qubits, qft_qb, rot_base));
+		if (m) func.push_back(genRot(qubits, qft_qb, res));
 
 		func.push_back(H0);
 
-		// print function
-		// for (int j = 0; j < func.size(); j++) cout << func[j] << endl;
-
 		dgm.executeFunction(func);
 
-		//if (!is_valid_quantum_state(dgm.state, qubits)){
-		//	cout << "Invalid quantum state 1 - " << i << endl;
-		//}
-
-		m = dgm.measure(qft_qb);
-
-		//if (!is_valid_quantum_state(dgm.state, qubits)){
-		//	cout << "Invalid quantum state 2 - " << i << endl;
-		//}
+		m = dgm.measure_parallel(qft_qb);
 
 		res = res << 1;
 
 		if (m)
 			res |= 1;
 	}
+
+	float multiplier = (L + 1) / (float) (L_COUNT);
+
+	double cpu_elapsed_time = 0;
+	for (int i = 0; i < n_threads; i++){
+		cpu_elapsed_time += dgm.elapsed_times[i];
+	}
+
+	//cout << "Qubits\tLimit\tType\tTime (s)\tL\tL_COUNT\tMultiplier\tProj Count\tCPU Proj Instance Count\tGPU Proj Instance Count\tGlobal Exe Time\tGPU Exe Time\tCPU Exec Time" << endl;
+	//cout << qubits << "\t" << qubits_limit << "\t" << type << "\t" << (shor_timer.elapsed() * multiplier) << "\t" << L << "\t" << L_COUNT << "\t" << multiplier << "\t" << (dgm.total_proj_count * multiplier) << "\t" << int(dgm.total_cpu_proj_instance_count * multiplier) << "\t" << int(dgm.total_gpu_proj_instance_count * multiplier) << "\t" << (dgm.elapsed_times[-1] * multiplier) << "\t" << (dgm.elapsed_times[n_threads] * multiplier) << "\t" << (cpu_elapsed_time * multiplier) << endl;
 
 /*
 	dgm.setFunction(func);
@@ -753,8 +753,6 @@ vector<int> Shor(long N, int type, int n_threads, int cpu_region, int cpu_coales
 	vector<int> factors;
 
 	int c = revert_bits(res, 2*n);
-
-	cout << "res: " << c << "   " << res << endl;
 
 	if(c==0)
 	{

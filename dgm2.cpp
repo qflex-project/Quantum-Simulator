@@ -372,6 +372,9 @@ std::complex <float>* DGM::execute(int it){
 			result = GpuExecutionWrapper(state, pts, qubits, gpu_coales, gpu_region, multi_gpu, tam_block, rept, it);
 			break;
 		case t_HYBRID:
+			HybridExecution(pts);
+			break;
+		case t_HYBRID_2:
 			HybridExecution2(pts);
 			break;
 		default:

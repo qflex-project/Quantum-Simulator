@@ -6,6 +6,7 @@
 #include <iterator>
 #include <bitset>
 #include <random>
+#include <chrono>
 
 void Tokenize(const string& str, vector<string>& tokens, const string& delimiters = ",")
 {
@@ -129,8 +130,7 @@ int DGM::measure(int q_pos){
 	long shift = (qubits - 1 - q_pos);
 	long mask = 1 << shift;
 
-	int count_one, count_zero, num_pb;
-	float zero, one, norm_factor, r;
+	float zero, one, norm_factor;
 	one = zero = 0;
 
 	//#pragma omp for;
@@ -147,7 +147,7 @@ int DGM::measure(int q_pos){
 	mt19937 gen(rd());
 	uniform_real_distribution<> dis(0.05, 0.95);
 
-	r = dis(gen);
+	float r = dis(gen);
 
 	if (r > zero){
 		norm_factor = sqrt(one);
@@ -181,7 +181,84 @@ int DGM::measure(int q_pos){
 		//cout << "###" << endl;
 	}
 
-	std::cout << q_pos << ": " << m << " (" << zero << " , " << one << ") " << r << " " << mask << " " << shift << " (" << sqrt(zero) << " , " << sqrt(one) << ") " << std::endl;
+	//std::cout << q_pos << ": " << m << " (" << zero << " , " << one << ") " << r << " " << mask << " " << shift << " (" << sqrt(zero) << " , " << sqrt(one) << ") " << std::endl;
+
+	return m;
+}
+
+int DGM::measure_parallel(int q_pos){
+	long size = pow(2.0, qubits);
+
+	long shift = (qubits - 1 - q_pos);
+	long mask = 1 << shift;
+	long dec = mask - 1;
+
+	float zero, one, norm_factor;
+	one = zero = 0;
+
+	omp_set_num_threads(n_threads);
+
+	#pragma omp parallel for reduction(+:zero)
+	for (long i = 0; i < size/2; i++) {
+		long pos = (i << 1) - (i & dec);
+		zero += norm(state[pos]);
+	}
+
+	one = 1.0 - zero;
+
+	long m;
+
+	random_device rd;
+	mt19937 gen(rd());
+	uniform_real_distribution<> dis(0.05, 0.95);
+
+	float r = dis(gen);
+
+	if (r > zero){
+		norm_factor = sqrt(one);
+		m = 1;
+	}
+	else{
+		norm_factor = sqrt(zero);
+		m = 0;
+	}
+
+	long m_mask = m << shift;
+
+	// colapse
+	#pragma omp parallel for
+	for (long i = 0; i < size/2; i++){
+		long pos = (i << 1) - (i & dec);
+		state[pos] = state[pos | m_mask]/norm_factor;
+		state[pos | mask] = 0.0;
+	}
+
+	/*
+	#pragma omp parallel for
+	for (long i = 0; i < size/2; i++){
+		long pos0 = (i * 2) - (i & (mask));
+		long pos1 = pos0 | mask;
+
+		//std::cout << "Pos0 " << pos0 << ": " << real(state[pos0]) << " + " << imag(state[pos0]) << "i" << endl;
+		//std::cout << "Pos1 " << pos1 << ": " << real(state[pos1]) << " + " << imag(state[pos1]) << "i" << endl;
+
+		if (m) {
+			state[pos0]	= state[pos1]/norm_factor;
+		}
+		else {
+			state[pos0]	= state[pos0]/norm_factor;
+		}
+
+		state[pos1] = 0.0;
+
+		//std::cout << "Pos0 " << pos0 << ": " << real(state[pos0]) << " + " << imag(state[pos0]) << "i" << endl;
+		//std::cout << "Pos1 " << pos1 << ": " << real(state[pos1]) << " + " << imag(state[pos1]) << "i" << endl;
+
+		//cout << "###" << endl;
+	}
+	*/
+
+	//std::cout << q_pos << ": " << m << " (" << zero << " , " << one << ") " << r << " " << mask << " " << shift << " (" << sqrt(zero) << " , " << sqrt(one) << ") " << std::endl;
 
 	return m;
 }
@@ -225,8 +302,7 @@ void DGM::printProbability(int q_pos){
 	long shift = (qubits - 1 - q_pos);
 	long mask = 1 << shift;
 
-	int count_one, count_zero, num_pb;
-	float zero, one, norm_factor, r;
+	float zero, one;
 	one = zero = 0;
 
 	//#pragma omp for;
@@ -318,19 +394,19 @@ map <long, Group> DGM::genGroups(string step){
 			ctrl_value = strtol(str.c_str()+p, &pEnd, 10);
 
 			gps[ctrl_num].ctrl.push_back(ctrl_value); //adicona o valor do controle
-			gps[ctrl_num].pos_ctrl.push_back(pos);  //e a sua posi√ß√£o ao map relacionado ao controle
+			gps[ctrl_num].pos_ctrl.push_back(pos);  //e a sua posiÁ„o ao map relacionado ao controle
 		}
 		else if(found_t != string::npos){ //Target
 			ctrl_num = strtol(str.c_str()+6, &pEnd, 10);
 			str = str.substr(p, str.size()-p-1);
 
 			gps[ctrl_num].ops.push_back(str);     //adicona o operador
-			gps[ctrl_num].pos_ops.push_back(pos); //e a sua posi√ß√£o ao map relacionado ao target
+			gps[ctrl_num].pos_ops.push_back(pos); //e a sua posiÁ„o ao map relacionado ao target
 		}
 		else{ //operador normal
 			if (str != "ID"){ //se for ID ignora
 				gps[0].ops.push_back(str);     //adiciona o operador
-				gps[0].pos_ops.push_back(pos); //e a sua posi√ß√£o ao map '0'
+				gps[0].pos_ops.push_back(pos); //e a sua posiÁ„o ao map '0'
 			}
 		}
 		pos++;
@@ -391,7 +467,7 @@ void DGM::genPTs(map<long, Group> &gps, vector <PT*> &step_pts){
 void DGM::genMatrix(std::complex <float>* matrix, vector<std::complex <float>*> &matrices, long tam, long current, long line, long column, std::complex <float> cmplx){
 	if (cmplx == COMPLEX_ZERO) return;
 
-	if (current == tam){ //percorreu at√© a ultima matriz
+	if (current == tam){ //percorreu atÈ a ultima matriz
 		matrix[line*(1<<tam) + column] = cmplx;
 		return;
 	}
@@ -430,7 +506,13 @@ std::complex <float>* DGM::execute(int it){
 			result = GpuExecutionWrapper(state, pts, qubits, gpu_coales, gpu_region, multi_gpu, tam_block, rept, it);
 			break;
 		case t_HYBRID:
+			HybridExecution(pts);
+			break;
+		case t_HYBRID_2:
 			HybridExecution2(pts);
+			break;
+		case t_GPU_2:
+			GpuExecution2(pts);
 			break;
 		#endif
 		default:
@@ -506,7 +588,7 @@ void DGM::CpuExecution1_1(PT *pt, long mem_size){ //Denso
 	
 	std::complex <float> tmp;
 		
-	if (!pt->ctrl_count){ 			//operador n√£o controlado
+	if (!pt->ctrl_count){ 			//operador n„o controlado
 		mem_size /= 2;
 		for (long pos = 0; pos < mem_size; pos++){
 			pos0 = (pos * 2) - (pos & (shift-1));
@@ -535,7 +617,7 @@ void DGM::CpuExecution1_1(PT *pt, long mem_size){ //Denso
 void DGM::CpuExecution1_2(PT *pt, long mem_size){ //Diagonal Principal
 	long pos0, shift = pt->end;
 		
-	if (!pt->ctrl_count)	//operador n√£o controlado
+	if (!pt->ctrl_count)	//operador n„o controlado
 		for (long pos = 0; pos < mem_size; pos++)
 			state[pos] = pt->matrix[((pos >> shift) & 1) * 3] * state[pos];
 	else{					//operador controlado
@@ -550,14 +632,14 @@ void DGM::CpuExecution1_2(PT *pt, long mem_size){ //Diagonal Principal
 	}
 }
 
-void DGM::CpuExecution1_3(PT *pt, long mem_size){ //Diagonal Secund√°ria
+void DGM::CpuExecution1_3(PT *pt, long mem_size){ //Diagonal Secund·ria
 	long pos0, pos1, shift;
 	
 	shift = 1 << pt->end;
 
 	std::complex <float> tmp;
 		
-	if (!pt->ctrl_count){ 	//operador n√£o controlado
+	if (!pt->ctrl_count){ 	//operador n„o controlado
 		mem_size /= 2;
 		for (long pos = 0; pos < mem_size; pos++){
 			pos0 = (pos * 2) - (pos & (shift-1));
@@ -593,7 +675,7 @@ void DGM::CpuExecution2_1(PT *pt, long mem_size){ //Denso
 
 	std::complex <float> tmp;
 		
-	if (!pt->ctrl_count) 			//operador n√£o controlado
+	if (!pt->ctrl_count) 			//operador n„o controlado
 		for (long pos = 0; pos < mem_size; pos++){
 			pos0 = (pos * 2) - (pos & (shift-1));
 			pos1 = pos0 | shift;
@@ -618,7 +700,7 @@ void DGM::CpuExecution2_1(PT *pt, long mem_size){ //Denso
 void DGM::CpuExecution2_2(PT *pt, long mem_size){ //Diagonal Principal
 	long shift = pt->end;
 		
-	if (!pt->ctrl_count)	//operador n√£o controlado
+	if (!pt->ctrl_count)	//operador n„o controlado
 		for (long pos = 0; pos < mem_size; pos++)
 			state[pos] = pt->matrix[((pos >> shift) & 1) * 3] * state[pos];
 	else					//operador controlado
@@ -630,7 +712,7 @@ void DGM::CpuExecution2_2(PT *pt, long mem_size){ //Diagonal Principal
 
 
 
-void DGM::CpuExecution2_3(PT *pt, long mem_size){ //Diagonal Secund√°ria
+void DGM::CpuExecution2_3(PT *pt, long mem_size){ //Diagonal Secund·ria
 	long pos0, pos1, shift;
 	
 	shift = 1 << pt->end;
@@ -638,7 +720,7 @@ void DGM::CpuExecution2_3(PT *pt, long mem_size){ //Diagonal Secund√°ria
 
 	std::complex <float> tmp;
 		
-	if (!pt->ctrl_count) 	//operador n√£o controlado
+	if (!pt->ctrl_count) 	//operador n„o controlado
 		for (long pos = 0; pos < mem_size; pos++){
 			pos0 = (pos * 2) - (pos & (shift-1));
 			pos1 = pos0 | shift;
@@ -669,7 +751,7 @@ void DGM::CpuExecution3_1(PT *pt, long mem_size){ //Denso
 
 	std::complex <float> tmp;
 		
-	if (!pt->ctrl_count){ 			//operador n√£o controlado
+	if (!pt->ctrl_count){ 			//operador n„o controlado
 		mem_size /= 2;
 		for (long pos = 0; pos < mem_size; pos++){
 			pos0 = (pos * 2) - (pos & (shift-1));
@@ -731,7 +813,7 @@ void DGM::CpuExecution3_1(PT *pt, long mem_size){ //Denso
 void DGM::CpuExecution3_2(PT *pt, long mem_size){ //Diagonal Principal
 	long pos0, shift = pt->end;
 		
-	if (!pt->ctrl_count)	//operador n√£o controlado
+	if (!pt->ctrl_count)	//operador n„o controlado
 		for (long pos = 0; pos < mem_size; pos++)
 			state[pos] = pt->matrix[((pos >> shift) & 1) * 3] * state[pos];
 	else{					//operador controlado
@@ -777,7 +859,7 @@ void DGM::CpuExecution3_2(PT *pt, long mem_size){ //Diagonal Principal
 	}
 }
 
-void DGM::CpuExecution3_3(PT *pt, long mem_size){ //Diagonal Secund√°ria
+void DGM::CpuExecution3_3(PT *pt, long mem_size){ //Diagonal Secund·ria
 	long pos0, pos1, shift;
 	
 	shift = 1 << pt->end;
@@ -785,7 +867,7 @@ void DGM::CpuExecution3_3(PT *pt, long mem_size){ //Diagonal Secund√°ria
 
 	std::complex <float> tmp;
 		
-	if (!pt->ctrl_count){ 	//operador n√£o controlado
+	if (!pt->ctrl_count){ 	//operador n„o controlado
 		mem_size /= 2;
 		for (long pos = 0; pos < mem_size; pos++){
 			pos0 = (pos * 2) - (pos & (shift-1));
@@ -851,32 +933,32 @@ void PCpuExecution1(std::complex <float> *state, PT **pts, int qubits, long n_th
 		long count = coales;
 		long reg_mask = (coales)? (1 << coales) - 1 : 0;
 
-		//Pega os operadores que est√£o dentro da regi√£o coalescida (reg_mask inicial),
-		//e acrescenta operadores em qubits fora dela at√© chegar ao limite da regi√£o (region definida)
+		//Pega os operadores que est„o dentro da regi„o coalescida (reg_mask inicial),
+		//e acrescenta operadores em qubits fora dela atÈ chegar ao limite da regi„o (region definida)
 		start = i;
-		while (count < region && pts[i] != NULL){					//Repete enquanto o n√∫mero de qubits da regi√£o n√£o atingir o limite (region) e houver operadores
-			if (//pts[i]->matrixType() != DIAG_PRI &&					//O qubit de operadores de diagonal principal n√£o importa para regi√£o (sempre podem ser acrescentados)
-				!((reg_mask >> pts[i]->end) & 1)){				//Se o qubit do operador estiver fora da regi√£o (reg_mask), incrementa o contador de qubits da regi√£o
+		while (count < region && pts[i] != NULL){					//Repete enquanto o n˙mero de qubits da regi„o n„o atingir o limite (region) e houver operadores
+			if (//pts[i]->matrixType() != DIAG_PRI &&					//O qubit de operadores de diagonal principal n„o importa para regi„o (sempre podem ser acrescentados)
+				!((reg_mask >> pts[i]->end) & 1)){				//Se o qubit do operador estiver fora da regi„o (reg_mask), incrementa o contador de qubits da regi„o
 				count++;
 			}
 
 			if (count <= region)// && pts[i]->matrixType() != DIAG_PRI)
-				reg_mask = reg_mask | (1 << pts[i]->end);			//Acrescenta o qubit do operador na regi√£o se ainda n√£o tiver atingido o limite (region)
+				reg_mask = reg_mask | (1 << pts[i]->end);			//Acrescenta o qubit do operador na regi„o se ainda n„o tiver atingido o limite (region)
 				
 			i++;
 		}
-		//Segue acerscentado at√© encontrar um operador que n√£o esteja dentro da regi√£o
+		//Segue acerscentado atÈ encontrar um operador que n„o esteja dentro da regi„o
 		while (pts[i] != NULL){
 			if (((reg_mask >> pts[i]->end) & 1))// || pts[i]->matrixType() == DIAG_PRI)
 				i++;
 			else
 				break;
 		}
-		end = i;													//Executa at√© o operador na posi√ßao 'i' (exclusive) nesta itera√ß√£o
+		end = i;													//Executa atÈ o operador na posi√ßao 'i' (exclusive) nesta iteraÁ„o
 
 
-		//Se o n√∫mero de qubits na regi√£o (count) n√£o tiver atingido o limite (region),
-		//acrescenta os ultimos qubits (final da mascara) √† regi√£o at√© completar
+		//Se o n˙mero de qubits na regi„o (count) n„o tiver atingido o limite (region),
+		//acrescenta os ultimos qubits (final da mascara) ‡ regi„o atÈ completar
 		//for (long a = 1<<(qubits-1); count < region; a = a >> 1){
 		for (long a = 1; count < region; a = a << 1){
 			if (a & ~reg_mask){
@@ -888,19 +970,19 @@ void PCpuExecution1(std::complex <float> *state, PT **pts, int qubits, long n_th
 		if (count < region)
 			region = count;
 
-		long reg_count = (1 << (qubits - region)) + 1; 				//N√∫mero de regi√µes 			-	 +1 para a condi√ß√£o de parada incluir todos
-		long pos_count = 1 << (region - 1); 						//N√∫mero de posi√ß√µes na regi√£o 	-	 -1 porque s√£o duas posi√ß√µes por itera√ß√£o
+		long reg_count = (1 << (qubits - region)) + 1; 				//n˙mero de regiıes 			-	 +1 para a condiÁ„o de parada incluir todos
+		long pos_count = 1 << (region - 1); 						//n˙mero de posiÁıes na regi„o 	-	 -1 porque s„o duas posiÁıes por iteraÁ„o
 
 		omp_set_num_threads(n_threads);
 
-		long ext_reg_id = 0;	//contador 'global' do n√∫mero de regi√µes j√° computadas
+		long ext_reg_id = 0;	//contador 'global' do n˙mero de regiıes j· computadas
 
 		#pragma omp parallel
 		{
 
-			long reg_id;		//indentificador local da regi√£o
+			long reg_id;		//indentificador local da regi„o
 
-			//Define a primeira regi√£o (reg_id) da thread
+			//Define a primeira regi„o (reg_id) da thread
 			#pragma omp critical (teste)
 			{
 				reg_id = ext_reg_id;
@@ -909,15 +991,12 @@ void PCpuExecution1(std::complex <float> *state, PT **pts, int qubits, long n_th
 				if (reg_count <= 0)
 					reg_id = -1;
 			}
-
-			int print = (omp_get_thread_num()==0);
-			
 			
 			while (reg_id != -1){		
 				//Computa os operadores
 				PCpuExecution1_0(state, pts, qubits, start, end, pos_count, reg_id, reg_mask);
 		
-				//Define a pr√≥xima regi√£o (reg_id) da thread
+				//Define a pr√≥xima regi„o (reg_id) da thread
 				#pragma omp critical (teste)
 				{
 					reg_id = ext_reg_id;
@@ -945,11 +1024,11 @@ void PCpuExecution1_0(std::complex <float> *state, PT **pts, int qubits, int sta
 
 	for (int op = start; op < end; op++){
 		QG = pts[op];
-		long shift = (1 << QG->end);						//mascara com a posi√ß√£o do qubit do operador
+		long shift = (1 << QG->end);						//mascara com a posiÁ„o do qubit do operador
 		long mt = QG->matrixType();
-		//if (mt == DIAG_PRI) shift = coalesc;	//se for um operador de diagonal principal, a posi√ß√£o do qubit n√£o √© relevante
-		long pos_mask = reg_mask & ~shift;			//mascara da posi√ß√£o --- retira o 'shift' da reg_mask, para o 'inc pular sobre ' esse bit tamb√©m
-		long inc = ~pos_mask + 1;						  	//usado para calcular a proxima posi√ß√£o de uma regi√£o
+		//if (mt == DIAG_PRI) shift = coalesc;	//se for um operador de diagonal principal, a posiÁ„o do qubit n„o È relevante
+		long pos_mask = reg_mask & ~shift;			//mascara da posiÁ„o --- retira o 'shift' da reg_mask, para o 'inc pular sobre ' esse bit tambÈm
+		long inc = ~pos_mask + 1;						  	//usado para calcular a proxima posiÁ„o de uma regi„o
 		long pos = 0;
 
 		//cout << "OP " << op << endl;
@@ -999,23 +1078,23 @@ void PCpuExecution1_0(std::complex <float> *state, PT **pts, int qubits, int sta
 					printf("Erro de Tipo\n");
 			}
 		}
-		//Importante: reg_id √© o identificador da regi√£o e corresponde ao valor dos qubits externos √† regi√£o de opera√ß√£o (reg_mask)
-		else {			
-			if ((QG->ctrl_mask & reg_id & ~reg_mask) == (QG->ctrl_value & ~reg_mask)){		//Verifica se a parte 'global' do controle satisfaz a regi√£o (reg_id)
+		//Importante: reg_id È o identificador da regi„o e corresponde ao valor dos qubits externos ‡ regi„o de operaÁ„o (reg_mask)
+		else {
+			if ((QG->ctrl_mask & reg_id & ~reg_mask) == (QG->ctrl_value & ~reg_mask)){		//Verifica se a parte 'global' do controle satisfaz a regi„o (reg_id)
 
-				// √â preciso arrumar o reg_mask retirando os qubits de controle que est√£o dentro da regi√£o e arrumar o reg_id para incluir o valor dos controles
-				long ctrl_reg_id = reg_id | QG->ctrl_value;				//Esta opera√ß√£o inclui o valor dos controles locais no reg_id (funciona pois os valores globais j√° deram match)
-				long ctrl_reg_mask = reg_mask;							//Valor inicial da mascara da regi√£o com controle
-				long ctrl_pos_count = pos_count;						//N√∫mero inicial de posi√ß√µes a serem calculadas
+				// … preciso arrumar o reg_mask retirando os qubits de controle que est„o dentro da regi„o e arrumar o reg_id para incluir o valor dos controles
+				long ctrl_reg_id = reg_id | QG->ctrl_value;				//Esta operaÁ„o inclui o valor dos controles locais no reg_id (funciona pois os valores globais j· deram match)
+				long ctrl_reg_mask = reg_mask;							//Valor inicial da mascara da regi„o com controle
+				long ctrl_pos_count = pos_count;						//n˙mero inicial de posiÁıes a serem calculadas
 
 				for (int i = 0, m = 1; i < qubits; i++, m = m << 1){ 	//percorre os qubits
-					if (m & reg_mask & QG->ctrl_mask){					//se o qubit pertencer a regi√£o e for um controle:
-						ctrl_reg_mask ^= m;								//	remove ele da regi√£o(reg_mask) (para n√£o iterar sobre ele)
-						ctrl_pos_count /= 2;							//	diminui a quantidade de posi√ß√µes que √© preciso calcular.
+					if (m & reg_mask & QG->ctrl_mask){					//se o qubit pertencer a regi„o e for um controle:
+						ctrl_reg_mask ^= m;								//	remove ele da regi„o(reg_mask) (para n„o iterar sobre ele)
+						ctrl_pos_count /= 2;							//	diminui a quantidade de posiÁıes que È preciso calcular.
 					}
 				}
 
-				pos_mask = ctrl_reg_mask & ~shift;						//mascara da posi√ß√£o --- retira o 'shift' da reg_mask, para o 'inc pular sobre' esse bit tamb√©m
+				pos_mask = ctrl_reg_mask & ~shift;						//mascara da posiÁ„o --- retira o 'shift' da reg_mask, para o 'inc pular sobre' esse bit tambÈm
 				inc = ~pos_mask + 1;
 
 				switch (mt){
@@ -1066,31 +1145,38 @@ void PCpuExecution1_0(std::complex <float> *state, PT **pts, int qubits, int sta
 
 void DGM::HybridExecution(PT **pts){
 	long mem_size = pow(2.0, qubits);
-	long qubits_limit = 20;
-	long global_coales = 15; //(cpu_coales > gpu_coales) ? cpu_coales : gpu_coales;
+	long qubits_limit = (this->qubits_limit > 0) ? this->qubits_limit : 20;
+	long global_coales = (this->global_coales > 0) ? this->global_coales : 15; //(cpu_coales > gpu_coales) ? cpu_coales : gpu_coales;
 
 	long global_region = qubits_limit;
 	long global_start, global_end;
 
 	long global_count, global_reg_mask, global_reg_count, global_pos_count, ext_proj_id; 
 
-	omp_set_num_threads(n_threads);
+	long cpu_proj_count = 0, gpu_proj_count = 0;
+
+	omp_set_num_threads(n_threads + 1);
+
+	Timer global_timer;
+	global_timer.start();
 
 	int i = 0;
 	while (pts[i] != NULL){
+		total_proj_count++;
+
 		global_count = global_coales;
 		global_reg_mask = (global_coales)? (1 << global_coales) - 1 : 0;
 
-		//Realiza a proje√ß√£o dos operadores de acordo com o limite de qubits que podem ser executados
+		//Realiza a projeÁ„o dos operadores de acordo com o limite de qubits que podem ser executados
 		global_start = i;
-		while (global_count < global_region && pts[i] != NULL){			//Repete enquanto o n√∫mero de qubits da regi√£o n√£o atingir o limite (region) e houver operadores
-			if (//pts[i]->matrixType() != DIAG_PRI &&					//O qubit de operadores de diagonal principal n√£o importa para regi√£o (sempre podem ser acrescentados)
+		while (global_count < global_region && pts[i] != NULL){			//Repete enquanto o n˙mero de qubits da regi„o n„o atingir o limite (region) e houver operadores
+			if (//pts[i]->matrixType() != DIAG_PRI &&					//O qubit de operadores de diagonal principal n„o importa para regi„o (sempre podem ser acrescentados)
 			!((global_reg_mask >> pts[i]->end) & 1)){				
 				global_count++;
 			}
 
 			if (global_count <= global_region)// && pts[i]->matrixType() != DIAG_PRI)
-				global_reg_mask = global_reg_mask | (1 << pts[i]->end);			//Acrescenta o qubit do operador na regi√£o se ainda n√£o tiver atingido o limite (region)	
+				global_reg_mask = global_reg_mask | (1 << pts[i]->end);			//Acrescenta o qubit do operador na regi„o se ainda n„o tiver atingido o limite (region)	
 
 			i++;
 		}
@@ -1103,8 +1189,8 @@ void DGM::HybridExecution(PT **pts){
 		}
 		global_end = i;
 
-		//Se o n√∫mero de qubits na regi√£o (count) n√£o tiver atingido o limite (region),
-		//acrescenta os ultimos qubits (final da mascara) √† regi√£o at√© completar
+		//Se o n˙mero de qubits na regi„o (count) n„o tiver atingido o limite (region),
+		//acrescenta os ultimos qubits (final da mascara) ‡ regi„o atÈ completar
 		//for (long a = 1<<(qubits-1); count < region; a = a >> 1){
 		for (long a = 1; global_count < global_region; a = a << 1){
 			if (a & ~global_reg_mask){
@@ -1116,18 +1202,30 @@ void DGM::HybridExecution(PT **pts){
 		if (global_count < global_region)
 			global_region = global_count;
 	
-		global_reg_count = (1 << (qubits - global_region)) + 1; 				//N√∫mero de regi√µes	- +1 para a condi√ß√£o de parada incluir todos
+		global_reg_count = (1 << (qubits - global_region)) + 1; 				//NÈmero de regiıes	- +1 para a condiÁ„o de parada incluir todos
 		global_pos_count = 1 << (global_region - 1);
 
 		/////////////////////////////////////////////////////////////////////////////////////////////////////
 
-		ext_proj_id = 0;	//contador 'global' do n√∫mero de regi√µes j√° computadas
+		ext_proj_id = 0;	//contador 'global' do n˙mero de regiıes j· computadas
 
-		//Define a primeira regi√£o (reg_id) da thread
+		//Define a primeira regi„o (reg_id) da thread
 
-		#pragma omp parallel num_threads(n_threads)
+		double cpu_max_time = 0, gpu_max_time = 0;
+
+		float cpu_threshold = 1.0;
+
+		float total_count = float(global_reg_count);
+
+		bool use_threshold = true;
+
+		#pragma omp parallel num_threads(n_threads + 1)
 		{
-			if (omp_get_thread_num() < n_threads){  //CPU EXECUTION
+			int thread_id = omp_get_thread_num();
+			Timer timer;
+			double elapsed_time = 0;
+
+			if (thread_id < n_threads){  //CPU EXECUTION
 				long cpu_proj_id;
 				
 				#pragma omp critical (global_hybrid)
@@ -1140,6 +1238,9 @@ void DGM::HybridExecution(PT **pts){
 				}
 	
 				while (cpu_proj_id != -1){
+					cpu_proj_count++;
+					timer.start();
+
 					long cpu_i, cpu_start, cpu_end;
 
 					cpu_start = global_start;
@@ -1150,13 +1251,13 @@ void DGM::HybridExecution(PT **pts){
 						long cpu_count = cpu_coales;
 						long cpu_reg_mask = (cpu_coales)? (1 << cpu_coales) - 1 : 0;
 			
-						while ((cpu_count < cpu_region) && (cpu_i < global_end)){	//Tem que pertencer a regi√£o 'global'
-							if (!((cpu_reg_mask >> pts[cpu_i]->end) & 1)){			//Se o qubit do operador estiver fora da regi√£o (reg_mask), incrementa o contador de qubits da regi√£o
+						while ((cpu_count < cpu_region) && (cpu_i < global_end)){	//Tem que pertencer a regi„o 'global'
+							if (!((cpu_reg_mask >> pts[cpu_i]->end) & 1)){			//Se o qubit do operador estiver fora da regi„o (reg_mask), incrementa o contador de qubits da regi„o
 								cpu_count++;
 							}
 		
 							if (cpu_count <= cpu_region)// && pts[i]->matrixType() != DIAG_PRI)
-								cpu_reg_mask = cpu_reg_mask | (1 << pts[cpu_i]->end);	//Acrescenta o qubit do operador na regi√£o se ainda n√£o tiver atingido o limite (region)
+								cpu_reg_mask = cpu_reg_mask | (1 << pts[cpu_i]->end);	//Acrescenta o qubit do operador na regi„o se ainda n„o tiver atingido o limite (region)
 						
 							cpu_i++;
 						}
@@ -1170,20 +1271,20 @@ void DGM::HybridExecution(PT **pts){
 						cpu_end = cpu_i;
 			
 						for (long a = 1; cpu_count < cpu_region; a = a << 1){
-							if ((a & global_reg_mask) && (a & ~cpu_reg_mask)){ //tem que n√£o estar na regi√£o da cpu e estar na global
+							if ((a & global_reg_mask) && (a & ~cpu_reg_mask)){ //tem que n„o estar na regi„o da cpu e estar na global
 								cpu_reg_mask = cpu_reg_mask | a;
 								cpu_count++;
 							}
 						}
 	
-						long cpu_reg_count = (1 << (global_region - cpu_region)) + 1; 		//N√∫mero de regi√µes				-	+1 para a condi√ß√£o de parada incluir todos
-						long cpu_pos_count = 1 << (cpu_region - 1); 						//N√∫mero de posi√ß√µes na regi√£o	-	-1 porque s√£o duas posi√ß√µes por itera√ß√£o
+						long cpu_reg_count = (1 << (global_region - cpu_region)) + 1; 		//n˙mero de regiıes				-	+1 para a condiÁ„o de parada incluir todos
+						long cpu_pos_count = 1 << (cpu_region - 1); 						//n˙mero de posiÁıes na regi„o	-	-1 porque s„o duas posiÁıes por iteraÁ„o
 
 				
 						long cpu_ext_proj_id = 0;
 						long inc_ext_proj_id = ~(cpu_reg_mask ^ global_reg_mask) & ((1 << qubits) - 1);
 			
-						long proj_id;		//indentificador local da regi√£o
+						long proj_id;		//indentificador local da regi„o
 						proj_id = cpu_ext_proj_id | cpu_proj_id;
 						cpu_ext_proj_id = (cpu_ext_proj_id + inc_ext_proj_id + 1) & ~inc_ext_proj_id;
 						cpu_reg_count--;
@@ -1201,217 +1302,60 @@ void DGM::HybridExecution(PT **pts){
 			
 						cpu_start = cpu_end;
 					}
-		
+
+					auto instance_elapsed_time = timer.elapsed();
+
+					elapsed_time = elapsed_time + instance_elapsed_time;
+
 					#pragma omp critical (global_hybrid)
 					{
-						cpu_proj_id = ext_proj_id;
-						ext_proj_id = (ext_proj_id + global_reg_mask + 1) & ~global_reg_mask;
-						global_reg_count--;
-							if (global_reg_count <= 0)
-						cpu_proj_id = -1;
+						if (use_threshold) {
+							if (instance_elapsed_time > cpu_max_time) {
+								cpu_max_time = instance_elapsed_time;
+							}
+
+							if (gpu_max_time != 0 && cpu_max_time > gpu_max_time) {
+								float new_cpu_threshold = float(total_count - (cpu_max_time/gpu_max_time) - 1) / float(total_count);
+
+								if (new_cpu_threshold < cpu_threshold) {
+									cpu_threshold = new_cpu_threshold;
+								}
+							}
+						}
+
+						// check threshold
+						if (use_threshold && ((cpu_threshold * total_count) > (total_count - global_reg_count))) {
+							cpu_proj_id = -1;
+						}
+						else {
+							cpu_proj_id = ext_proj_id;
+							ext_proj_id = (ext_proj_id + global_reg_mask + 1) & ~global_reg_mask;
+							global_reg_count--;
+							if (global_reg_count <= 0) {
+								cpu_proj_id = -1;
+							}
+						}
 					}
 				}
 				
 			}
 			//#pragma omp section          //GPU EXECUTION
 			else{
-				#ifndef ONLY_CPU
-					long gpu_proj_id;
-					
-					#pragma omp critical (global_hybrid)
-					{
-						gpu_proj_id = ext_proj_id;
-						ext_proj_id = (ext_proj_id + global_reg_mask + 1) & ~global_reg_mask;
-						global_reg_count--;
-						if (global_reg_count <= 0)
-							gpu_proj_id = -1;
-					}
-
-					while (gpu_proj_id != -1){
-						//Project Gates
-						vector <PT*> gpu_pts;
-						
-						int gpu_i;
-
-						int map_qb[qubits];
-						memset(map_qb, -1, qubits * sizeof(int));
-			
-						int m = 0;
-						for (gpu_i = 0; gpu_i < qubits; gpu_i++){
-							if ((1 << gpu_i) & global_reg_mask){
-								map_qb[gpu_i] = m++;
-							}
-						}
-						
-						PT *aux;
-						gpu_pts.clear();
-						for (int gpu_i = global_start; gpu_i < global_end; gpu_i++){
-							
-							//verifica se o controle do operador satisfaz a parte global da regi√£o
-							if ((pts[gpu_i]->ctrl_mask & gpu_proj_id & ~global_reg_mask) == (pts[gpu_i]->ctrl_value & ~global_reg_mask)){
-								aux = new PT();
-
-								aux->qubits = pts[gpu_i]->qubits;
-
-								aux->matrix = pts[gpu_i]->matrix;
-								aux->mat_size = pts[gpu_i]->mat_size;
-								aux->ctrl_mask = pts[gpu_i]->ctrl_mask & global_reg_mask;
-								aux->ctrl_value = pts[gpu_i]->ctrl_value & global_reg_mask;
-
-								aux->end = map_qb[pts[gpu_i]->end];
-								aux->start = aux->end - log2(aux->mat_size);
-
-								aux->ctrl_count = 0;
-								for (int c = global_coales; c < qubits; c++){
-									if (aux->ctrl_mask & (1<<c)){
-										aux->ctrl_count++;
-
-										aux->ctrl_mask &= ~(1<<c);			//retira da mascara o controle do qubit atual (c)
-										aux->ctrl_mask |= (1 << map_qb[c]);	//e coloca o qubit que ele mapeia (map_qb[c])
-
-										if (aux->ctrl_value & (1<<c)){ 		//se o valor do controle for zero faz a mesma coisa para ctrl_value;
-											aux->ctrl_mask &= ~(1<<c);
-											aux->ctrl_mask |= (1 << map_qb[c]);
-										}
-									}
-								}	
-
-								gpu_pts.push_back(aux);
-							}
-						}
-						gpu_pts.push_back(NULL);
-						////////////////
-
-						ProjectState(state, qubits, global_region, gpu_proj_id, global_reg_mask, multi_gpu);
-
-						GpuExecutionWrapper(NULL, &gpu_pts[0], global_region, gpu_coales, gpu_region, multi_gpu, tam_block, rept, 1);
-		
-						GetState(state, qubits, global_region, gpu_proj_id, global_reg_mask, multi_gpu);
-
-						for (int c = 0; c < gpu_pts.size() - 1; c++){
-							delete gpu_pts[c];
-						}
-			
-						#pragma omp critical (global_hybrid)
-						{
-							gpu_proj_id = ext_proj_id;
-							ext_proj_id = (ext_proj_id + global_reg_mask + 1) & ~global_reg_mask;
-							global_reg_count--;
-							if (global_reg_count <= 0)
-								gpu_proj_id = -1;
-						}
-					}
-				#endif
-			}
-		//}
-		}
-	}
-}
-
-void DGM::HybridExecution2(PT **pts){
-	long mem_size = pow(2.0, qubits);
-	long qubits_limit = 20;
-	long global_coales = 11; //(cpu_coales > gpu_coales) ? cpu_coales : gpu_coales;
-
-	long global_region = qubits_limit;
-	long global_start, global_end;
-
-	long global_count, global_reg_mask, global_reg_count, global_pos_count, ext_proj_id;
-
-	cout << "HybridExecution2" << endl;
-	cout << "n_threads: " << n_threads << endl;
-	cout << "qubits: " << qubits << endl;
-	cout << "global_region: " << global_region << endl;
-	cout << "global_coales: " << global_coales << endl;
-	cout << "cpu_coales: " << cpu_coales << endl;
-	cout << "cpu_region: " << cpu_region << endl;
-
-	omp_set_num_threads(n_threads);
-
-	Barrier cpu_barrier(n_threads);
-
-	while (pts[global_start] != NULL){		
-		Projection global_proj;
-		global_proj.setData(nullptr, pts, global_start, -1, qubits, global_coales, global_region);
-
-		global_end = global_start + global_proj.operators_count;
-
-		//cout << "\n#######\nGLOBAL PROJ " << global_start << " - " << global_end << endl;
-		//global_proj.printInfo();
-		//cout << "#######" << endl;
-
-		long global_cpu_proj_id;
-
-		Projection cpu_proj;
-		long cpu_start, cpu_end, cpu_pos_count;
-
-		#pragma omp parallel num_threads(n_threads)
-		{
-			long thread_id = omp_get_thread_num();
-			//cout << string("ThreadID " + std::to_string(thread_id) + "\n");
-			if (thread_id < n_threads){  //CPU EXECUTION		
-				// get first global projection id	
-				if (thread_id == 0){ // master thread for cpu
-					global_cpu_proj_id = global_proj.getNextProjectionId();
-					cpu_end = global_start; // set start operator
-
-					//cout << string("\n#######\nFIRST GLOBAL CPU PROJ ID: " + getBinaryString(global_cpu_proj_id, qubits, true) + " - " + std::to_string(global_proj.count) + "\n");
+				long gpu_proj_id;
+				
+				#pragma omp critical (global_hybrid)
+				{
+					gpu_proj_id = ext_proj_id;
+					ext_proj_id = (ext_proj_id + global_reg_mask + 1) & ~global_reg_mask;
+					global_reg_count--;
+					if (global_reg_count <= 0)
+						gpu_proj_id = -1;
 				}
-
-				// wait for all cpu threads
-				cpu_barrier.arrive_and_wait(1);
-	
-				while (global_cpu_proj_id != -1){
-					cpu_barrier.arrive_and_wait(2);
-					// get first cpu sub projection from global projection
-
-					while (cpu_end < global_end) {
-						cpu_barrier.arrive_and_wait(3);
-						if (thread_id == 0){ // master thread for cpu
-							cpu_start = cpu_end;
-							cpu_proj.setData(&global_proj, pts, cpu_start, global_end, qubits, cpu_coales, cpu_region);
-							cpu_end = cpu_start + cpu_proj.operators_count;
-
-							cpu_pos_count = 1 << (cpu_proj.region_size);
-
-							//cout << string("\n#######\nSUB CPU PROJ " + std::to_string(cpu_start) + " - " + std::to_string(cpu_end) + "\n");
-							//cpu_proj.printInfo();
-						}
-						cpu_barrier.arrive_and_wait(4);
-						////////////////////////////////////////////////////
-						long cpu_proj_id = cpu_proj.getNextProjectionId();
-						
-						while (cpu_proj_id != -1){
-							//cout << string("ThreadId " + std::to_string(thread_id) + ": cpu_proj_id " + getBinaryString(cpu_proj_id, qubits, true) + " - " + std::to_string(cpu_proj.count) + "\n");
-							//Computa os operadores
-							PCpuExecution1_0(state, pts, qubits, cpu_start, cpu_end, cpu_pos_count / 2, cpu_proj_id, cpu_proj.region_mask);
-
-							cpu_proj_id = cpu_proj.getNextProjectionId();
-						}
-
-						//cpu_barrier.arrive_and_wait();
-
-						////////////////////////////////////////////////////
-					}
-
-					cpu_barrier.arrive_and_wait(5);
-					// get next global projection id
-					if (thread_id == 0){ // master thread for cpu
-						global_cpu_proj_id = global_proj.getNextProjectionId();
-						cpu_end = global_start; // reset start operator
-
-						//cout << string("\n#######\nGLOBAL CPU PROJ ID " + getBinaryString(global_cpu_proj_id, qubits, true) + " - " + std::to_string(global_proj.count) + "\n");
-					}
-					cpu_barrier.arrive_and_wait(6);
-
-				}
-			}
-			//#pragma omp section          //GPU EXECUTION
-			else{
-				cout << "\n#######\nGPU EXECUTION" << endl;
-				long gpu_proj_id = global_proj.getNextProjectionId();
 
 				while (gpu_proj_id != -1){
+					gpu_proj_count++;
+					timer.start();
+
 					//Project Gates
 					vector <PT*> gpu_pts;
 					
@@ -1431,7 +1375,7 @@ void DGM::HybridExecution2(PT **pts){
 					gpu_pts.clear();
 					for (int gpu_i = global_start; gpu_i < global_end; gpu_i++){
 						
-						//verifica se o controle do operador satisfaz a parte global da regi√£o
+						//verifica se o controle do operador satisfaz a parte global da regi„o
 						if ((pts[gpu_i]->ctrl_mask & gpu_proj_id & ~global_reg_mask) == (pts[gpu_i]->ctrl_value & ~global_reg_mask)){
 							aux = new PT();
 
@@ -1475,15 +1419,358 @@ void DGM::HybridExecution2(PT **pts){
 					for (int c = 0; c < gpu_pts.size() - 1; c++){
 						delete gpu_pts[c];
 					}
+
+					auto instance_elapsed_time = timer.elapsed();
+
+					elapsed_time = elapsed_time + instance_elapsed_time;
+		
+					#pragma omp critical (global_hybrid)
+					{
+						if (use_threshold) {
+							if (instance_elapsed_time > gpu_max_time) {
+								gpu_max_time = instance_elapsed_time;
+							}
+						}
+
+						gpu_proj_id = ext_proj_id;
+						ext_proj_id = (ext_proj_id + global_reg_mask + 1) & ~global_reg_mask;
+						global_reg_count--;
+						if (global_reg_count <= 0) {
+							gpu_proj_id = -1;
+						}
+					}
+				}
+			}
+		//}
+			#pragma omp critical (global_hybrid)
+			{
+				addElapsedTime(thread_id, elapsed_time);
+			}
+		}
+	}
+
+	addElapsedTime(-1, global_timer.elapsed());
+
+	this->total_cpu_proj_instance_count = this->total_cpu_proj_instance_count + cpu_proj_count;
+	this->total_gpu_proj_instance_count = this->total_gpu_proj_instance_count + gpu_proj_count;
+}
+
+void DGM::HybridExecution2(PT **pts){
+	long mem_size = pow(2.0, qubits);
+	long qubits_limit = (this->qubits_limit > 0) ? this->qubits_limit : 20;
+	long global_coales = (this->global_coales > 0) ? this->global_coales : 15; //(cpu_coales > gpu_coales) ? cpu_coales : gpu_coales;
+
+	long global_region = qubits_limit;
+	long global_start, global_end;
+
+	omp_set_num_threads(n_threads + 1);
+
+	Barrier cpu_barrier(n_threads);
+
+	long cpu_proj_count = 0, gpu_proj_count = 0;
+
+	global_start = 0;
+
+	Timer global_timer;
+	global_timer.start();
+
+	while (pts[global_start] != NULL){
+		total_proj_count++;
+
+		Projection global_proj;
+		global_proj.setData(nullptr, pts, global_start, -1, qubits, global_coales, global_region);
+
+		global_end = global_start + global_proj.operators_count;
+
+		//cout << "\n#######\nGLOBAL PROJ " << global_start << " - " << global_end << endl;
+		//global_proj.printInfo();
+		//cout << "#######" << endl;
+
+		long global_cpu_proj_id;
+
+		Projection cpu_proj;
+		long cpu_start, cpu_end, cpu_pos_count;
+
+		double cpu_max_time = 0, gpu_max_time = 0;
+
+		float cpu_threshold = 1.0;
+		bool use_threshold = true;
+
+		#pragma omp parallel num_threads(n_threads + 1)
+		{
+			long thread_id = omp_get_thread_num();
+			double elapsed_time = 0;
+
+			Timer timer;
+			//cout << string("ThreadID " + std::to_string(thread_id) + "\n");
+			if (thread_id < n_threads){  //CPU EXECUTION
+				// get first global projection id	
+				if (thread_id == 0){ // master thread for cpu
+					global_cpu_proj_id = global_proj.getNextProjectionId();
+					cpu_end = global_start; // set start operator
+					cpu_proj_count++;
+					//cout << string("\n#######\nFIRST GLOBAL CPU PROJ ID: " + getBinaryString(global_cpu_proj_id, qubits, true) + " - " + std::to_string(global_proj.count) + "\n");
+				}
+
+				// wait for all cpu threads
+				cpu_barrier.arrive_and_wait(1);
+	
+				while (global_cpu_proj_id != -1){
+					cpu_barrier.arrive_and_wait(2);
+					// get first cpu sub projection from global projection
+
+					timer.start();
+
+					while (cpu_end < global_end) {
+						cpu_barrier.arrive_and_wait(3);
+						if (thread_id == 0){ // master thread for cpu
+							cpu_start = cpu_end;
+							cpu_proj.setData(&global_proj, pts, cpu_start, global_end, qubits, cpu_coales, cpu_region);
+							cpu_end = cpu_start + cpu_proj.operators_count;
+
+							cpu_pos_count = 1 << (cpu_proj.region_size);
+
+							//cout << string("\n#######\nSUB CPU PROJ " + std::to_string(cpu_start) + " - " + std::to_string(cpu_end) + "\n");
+							//cpu_proj.printInfo();
+						}
+						cpu_barrier.arrive_and_wait(4);
+						////////////////////////////////////////////////////
+						long cpu_proj_id = cpu_proj.getNextProjectionId();
+						
+						while (cpu_proj_id != -1){
+							//cout << string("ThreadId " + std::to_string(thread_id) + ": cpu_proj_id " + getBinaryString(cpu_proj_id, qubits, true) + " - " + std::to_string(cpu_proj.count) + "\n");
+							//Computa os operadores
+							PCpuExecution1_0(state, pts, qubits, cpu_start, cpu_end, cpu_pos_count / 2, cpu_proj_id, cpu_proj.region_mask);
+
+							cpu_proj_id = cpu_proj.getNextProjectionId();
+						}
+
+						//cpu_barrier.arrive_and_wait();
+
+						////////////////////////////////////////////////////
+					}
+
+					cpu_barrier.arrive_and_wait(5);
+
+					auto instance_elapsed_time = timer.elapsed();
+					elapsed_time = elapsed_time + instance_elapsed_time;
+
+					// get next global projection id
+					if (thread_id == 0){ // master thread for cpu
+						if (use_threshold) {
+							if (instance_elapsed_time > cpu_max_time) {
+								cpu_max_time = instance_elapsed_time;
+							}
+
+							if (gpu_max_time != 0 && cpu_max_time > gpu_max_time) {
+								float new_cpu_threshold = float(global_proj.total - ((cpu_max_time/gpu_max_time) - 1) * 2) / float(global_proj.total);
+								//cout << string("\n#######\nChecking Cpu Threshold: " + std::to_string(cpu_threshold) + " - " + std::to_string(new_cpu_threshold) + " - " + std::to_string(cpu_max_time) + " - " + std::to_string(gpu_max_time) + "\n");
+
+								if (new_cpu_threshold < cpu_threshold) {
+									cpu_threshold = new_cpu_threshold;
+									//cout << string("####### Updated Cpu Threshold: " + std::to_string(cpu_threshold) + " - " + std::to_string(cpu_max_time) + " - " + std::to_string(gpu_max_time) + "\n");
+								}
+							}
+						}
+
+						global_cpu_proj_id = global_proj.getNextProjectionId(cpu_threshold);
+						cpu_end = global_start; // reset start operator
+						cpu_proj_count++;
+					}
+					cpu_barrier.arrive_and_wait(6);
+				}
+			}
+			//#pragma omp section          //GPU EXECUTION
+			else{
+				long gpu_proj_id = global_proj.getNextProjectionId();
+
+				while (gpu_proj_id != -1){
+					//Project Gates
+					vector <PT*> gpu_pts;
+					gpu_proj_count++;
+
+					timer.start();
+					
+					int map_qb[qubits];
+					memset(map_qb, -1, qubits * sizeof(int));
+		
+					int m = 0;
+					for (int gpu_i = 0; gpu_i < qubits; gpu_i++){
+						if ((1 << gpu_i) & global_proj.region_mask){
+							map_qb[gpu_i] = m++;
+						}
+					}
+					
+					PT *aux;
+					gpu_pts.clear();
+					for (int gpu_i = global_start; gpu_i < global_end; gpu_i++){
+						
+						//verifica se o controle do operador satisfaz a parte global da regi„o
+						if ((pts[gpu_i]->ctrl_mask & gpu_proj_id & ~global_proj.region_mask) == (pts[gpu_i]->ctrl_value & ~global_proj.region_mask)){
+							aux = new PT();
+
+							aux->qubits = pts[gpu_i]->qubits;
+
+							aux->matrix = pts[gpu_i]->matrix;
+							aux->mat_size = pts[gpu_i]->mat_size;
+							aux->ctrl_mask = pts[gpu_i]->ctrl_mask & global_proj.region_mask;
+							aux->ctrl_value = pts[gpu_i]->ctrl_value & global_proj.region_mask;
+
+							aux->end = map_qb[pts[gpu_i]->end];
+							aux->start = aux->end - log2(aux->mat_size);
+
+							aux->ctrl_count = 0;
+							for (int c = global_coales; c < qubits; c++){
+								if (aux->ctrl_mask & (1<<c)){
+									aux->ctrl_count++;
+
+									aux->ctrl_mask &= ~(1<<c);			//retira da mascara o controle do qubit atual (c)
+									aux->ctrl_mask |= (1 << map_qb[c]);	//e coloca o qubit que ele mapeia (map_qb[c])
+
+									if (aux->ctrl_value & (1<<c)){ 		//se o valor do controle for zero faz a mesma coisa para ctrl_value;
+										aux->ctrl_mask &= ~(1<<c);
+										aux->ctrl_mask |= (1 << map_qb[c]);
+									}
+								}
+							}	
+
+							gpu_pts.push_back(aux);
+						}
+					}
+					gpu_pts.push_back(NULL);
+					////////////////
+
+					ProjectState(state, qubits, global_region, gpu_proj_id, global_proj.region_mask, multi_gpu);
+
+					GpuExecutionWrapper(NULL, &gpu_pts[0], global_region, gpu_coales, gpu_region, multi_gpu, tam_block, rept, 1);
+	
+					GetState(state, qubits, global_region, gpu_proj_id, global_proj.region_mask, multi_gpu);
+
+					for (int c = 0; c < gpu_pts.size() - 1; c++){
+						delete gpu_pts[c];
+					}
+
+					auto instance_elapsed_time = timer.elapsed();
+
+					elapsed_time = elapsed_time + instance_elapsed_time;
+
+					if (use_threshold) {
+						if (instance_elapsed_time > gpu_max_time) {
+							gpu_max_time = instance_elapsed_time;
+						}
+					}
 		
 					gpu_proj_id = global_proj.getNextProjectionId();
 				}
+			}
+
+			#pragma omp critical (global_hybrid)
+			{
+				addElapsedTime(thread_id, elapsed_time);
 			}
 		//}
 		}
 
 		global_start = global_end;
 	}
+
+	addElapsedTime(-1, global_timer.elapsed());
+
+	this->total_cpu_proj_instance_count = this->total_cpu_proj_instance_count + cpu_proj_count;
+	this->total_gpu_proj_instance_count = this->total_gpu_proj_instance_count + gpu_proj_count;
+}
+
+void DGM::GpuExecution2(PT **pts){
+	long mem_size = pow(2.0, qubits);
+	long qubits_limit = (this->qubits_limit > 0) ? this->qubits_limit : 20;
+	long global_coales = (this->global_coales > 0) ? this->global_coales : 15; //(cpu_coales > gpu_coales) ? cpu_coales : gpu_coales;
+
+	long global_region = qubits_limit;
+	long global_start, global_end;
+
+	Timer global_timer;
+	global_timer.start();
+
+	global_start = 0;
+	while (pts[global_start] != NULL){
+		total_proj_count++;
+
+		Projection global_proj;
+		global_proj.setData(nullptr, pts, global_start, -1, qubits, global_coales, global_region);
+
+		global_end = global_start + global_proj.operators_count;
+
+		long gpu_proj_id = global_proj.getNextProjectionId();
+		while (gpu_proj_id != -1){
+			//Project Gates
+			vector <PT*> gpu_pts;
+			
+			int map_qb[qubits];
+			memset(map_qb, -1, qubits * sizeof(int));
+
+			int m = 0;
+			for (int gpu_i = 0; gpu_i < qubits; gpu_i++){
+				if ((1 << gpu_i) & global_proj.region_mask){
+					map_qb[gpu_i] = m++;
+				}
+			}
+			
+			PT *aux;
+			gpu_pts.clear();
+			for (int gpu_i = global_start; gpu_i < global_end; gpu_i++){
+				
+				//verifica se o controle do operador satisfaz a parte global da regi„o
+				if ((pts[gpu_i]->ctrl_mask & gpu_proj_id & ~global_proj.region_mask) == (pts[gpu_i]->ctrl_value & ~global_proj.region_mask)){
+					aux = new PT();
+
+					aux->qubits = pts[gpu_i]->qubits;
+
+					aux->matrix = pts[gpu_i]->matrix;
+					aux->mat_size = pts[gpu_i]->mat_size;
+					aux->ctrl_mask = pts[gpu_i]->ctrl_mask & global_proj.region_mask;
+					aux->ctrl_value = pts[gpu_i]->ctrl_value & global_proj.region_mask;
+
+					aux->end = map_qb[pts[gpu_i]->end];
+					aux->start = aux->end - log2(aux->mat_size);
+
+					aux->ctrl_count = 0;
+					for (int c = global_coales; c < qubits; c++){
+						if (aux->ctrl_mask & (1<<c)){
+							aux->ctrl_count++;
+
+							aux->ctrl_mask &= ~(1<<c);			//retira da mascara o controle do qubit atual (c)
+							aux->ctrl_mask |= (1 << map_qb[c]);	//e coloca o qubit que ele mapeia (map_qb[c])
+
+							if (aux->ctrl_value & (1<<c)){ 		//se o valor do controle for zero faz a mesma coisa para ctrl_value;
+								aux->ctrl_mask &= ~(1<<c);
+								aux->ctrl_mask |= (1 << map_qb[c]);
+							}
+						}
+					}	
+
+					gpu_pts.push_back(aux);
+				}
+			}
+			gpu_pts.push_back(NULL);
+			////////////////
+
+			ProjectState(state, qubits, global_region, gpu_proj_id, global_proj.region_mask, multi_gpu);
+
+			GpuExecutionWrapper(NULL, &gpu_pts[0], global_region, gpu_coales, gpu_region, multi_gpu, tam_block, rept, 1);
+
+			GetState(state, qubits, global_region, gpu_proj_id, global_proj.region_mask, multi_gpu);
+
+			for (int c = 0; c < gpu_pts.size() - 1; c++){
+				delete gpu_pts[c];
+			}
+
+			gpu_proj_id = global_proj.getNextProjectionId();
+		}
+
+		global_start = global_end;
+	}
+
+	addElapsedTime(-1, global_timer.elapsed());
 }
 
 #endif
@@ -1500,28 +1787,42 @@ void DGM::setGpuStructure(long gpu_region, long gpu_coales, int rept){
 	this->tam_block = 1 << gpu_region / 2 / rept;
 }
 
-void Projection::setData(Projection *parent_proj, PT **pts, long start, long end, long qubits, long coales, long region_size, bool include_main_diag) {
-	region_mask = (coales > 0) ? (1 << coales) - 1 : 0; // mascara da regi√£o, inicializada com os quibts de coalescencia
-	
-	long count = coales; // conta o n√∫mero de qubits na regi√£o
+void DGM::resetElapsedTimes(){
+	elapsed_times.clear();
+}
 
-	//Realiza a proje√ß√£o dos operadores de acordo com o limite de qubits que podem ser executados
+void DGM::addElapsedTime(int index, double time){
+	elapsed_times[index] = elapsed_times[index] + time;
+}
+
+void DGM::printElapsedTimes(){
+	cout << "Elapsed Times" << endl;
+	for (const auto& [key, value] : elapsed_times)
+		cout << '[' << key << "] = " << value << endl;
+}
+
+void Projection::setData(Projection *parent_proj, PT **pts, long start, long end, long qubits, long coales, long region_size, bool include_main_diag) {
+	region_mask = (coales > 0) ? (1 << coales) - 1 : 0; // mascara da regi„o, inicializada com os quibts de coalescencia
+	
+	long count = coales; // conta o n˙mero de qubits na regi„o
+
+	//Realiza a projeÁ„o dos operadores de acordo com o limite de qubits que podem ser executados
 
 	long i = start;
-	while (count < region_size && (end < 0 || i < end) && pts[i] != NULL){	//Repete enquanto o n√∫mero de qubits da regi√£o n√£o atingir o limite (region) e houver operadores
-		if (!(include_main_diag && pts[i]->matrixType() == DIAG_PRI)) { // verifica se pode incluir operadores de diagonal principal automaticamente, pois em alguns cen√°rios eles n√£o importam para a proje√ß√£o e sempre podem ser acrescentados
-			if (!((region_mask >> pts[i]->end) & 1)) { // se o qubit do operador n√£o estiver sido acrescentado ainda, ent√£o incrementa o contador de qubits da regi√£o
+	while (count < region_size && (end < 0 || i < end) && pts[i] != NULL){	//Repete enquanto o n˙mero de qubits da regi„o n„o atingir o limite (region) e houver operadores
+		if (!(include_main_diag && pts[i]->matrixType() == DIAG_PRI)) { // verifica se pode incluir operadores de diagonal principal automaticamente, pois em alguns cen·rios eles n„o importam para a projeÁ„o e sempre podem ser acrescentados
+			if (!((region_mask >> pts[i]->end) & 1)) { // se o qubit do operador n„o estiver sido acrescentado ainda, ent„o incrementa o contador de qubits da regi„o
 				count++;
 
-				if (count <= region_size) // se n√£o tiver atingido o limite
-					region_mask = region_mask | (1 << pts[i]->end);			// Acrescenta o qubit do operador na regi√£o se ainda n√£o tiver atingido o limite (region)
+				if (count <= region_size) // se n„o tiver atingido o limite
+					region_mask = region_mask | (1 << pts[i]->end);			// Acrescenta o qubit do operador na regi„o se ainda n„o tiver atingido o limite (region)
 			}
 		}
 
 		i++;
 	}
 
-	// segue acrescentando operadores enquanto eles estiverem dentro da regi√£o
+	// segue acrescentando operadores enquanto eles estiverem dentro da regi„o
 	while ((end < 0 || i < end) && pts[i] != NULL){
 		if ((include_main_diag && pts[i]->matrixType() == DIAG_PRI) || ((region_mask >> pts[i]->end) & 1))
 			i++;
@@ -1529,8 +1830,8 @@ void Projection::setData(Projection *parent_proj, PT **pts, long start, long end
 			break;
 	}
 
-	//Se o n√∫mero de qubits na regi√£o (count) n√£o tiver atingido o limite (region_size),
-	//acrescenta os ultimos qubits (final da mascara) √† regi√£o at√© completar
+	//Se o n˙mero de qubits na regi„o (count) n„o tiver atingido o limite (region_size),
+	//acrescenta os ultimos qubits (final da mascara) ‡ regi„o atÈ completar
 	//for (long a = 1<<(qubits-1); count < region; a = a >> 1){
 	for (long b = 1; count < region_size; b = b << 1){
 		if ((b & ~region_mask) && (!parent_proj || (b & parent_proj->region_mask))){
@@ -1560,11 +1861,11 @@ void Projection::setData(Projection *parent_proj, PT **pts, long start, long end
 	}
 }
 
-long Projection::getNextProjectionId() {
+long Projection::getNextProjectionId(float limit) {
 	std::lock_guard<std::mutex> lock(mutex_);
 
 	count++;
-	if (count > total)
+	if (count > (total * limit))
 		return -1;
 
 	cur_id = next_id;

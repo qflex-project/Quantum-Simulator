@@ -7,6 +7,7 @@
 #include <map>
 #include <algorithm>
 #include <sstream>
+#include <chrono>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -55,6 +56,8 @@ enum {
 	t_PAR_CPU,
 	t_GPU,
 	t_HYBRID,
+	t_HYBRID_2,
+	t_GPU_2,
 	t_SPEC
 };
 
@@ -77,7 +80,7 @@ class Projection {
 
 		Projection(){};
 		void setData(Projection *parent_proj, PT **pts, long start, long end, long qubits, long coales, long region_size, bool include_main_diag = false);
-		long getNextProjectionId();
+		long getNextProjectionId(float limit = 1.0);
 		void printInfo();
 };
 
@@ -113,6 +116,9 @@ public:
 	 
 	int tam_block;
 	int rept;
+
+	long qubits_limit = 0;
+	long global_coales = 0;
 	
 	vector <PT*> vec_pts;
 	PT** pts;
@@ -120,8 +126,10 @@ public:
 
 	float measure_value;
 
-	float elapsed_time;
-	struct timeval timev;
+	long total_proj_count = 0;
+	long total_cpu_proj_instance_count = 0;
+	long total_gpu_proj_instance_count = 0;
+	std::map<int, double> elapsed_times;
 
 	std::complex <float> *state;
 
@@ -144,6 +152,7 @@ public:
 	void setSuperposition();
 	
 	int measure(int q_pos);
+	int measure_parallel(int q_pos);
 	map <long, float> measure(vector<int> q_pos);
 	void colapse(int q_pos, int value);
 	void printProbability(int q_pos);
@@ -162,6 +171,7 @@ public:
 
 	void HybridExecution(PT **pts);
 	void HybridExecution2(PT **pts);
+	void GpuExecution2(PT **pts);
 
 	void CpuExecution1(int it);
 	void CpuExecution1_1(PT *pt, long mem_size);
@@ -177,6 +187,9 @@ public:
 	void CpuExecution3_2(PT *pt, long mem_size);
 	void CpuExecution3_3(PT *pt, long mem_size);
 
+	void resetElapsedTimes();
+	void addElapsedTime(int index, double time);
+	void printElapsedTimes();
 };
 
 class Barrier {
@@ -210,6 +223,28 @@ private:
 	int initial_count_;
 	int generation_ = 0;
 	int point_ = 0;
+};
+
+class Timer {
+private:
+    std::chrono::time_point<std::chrono::steady_clock> start_time;
+public:
+    Timer() {
+        start();
+    }
+
+    void start() {
+        start_time = std::chrono::steady_clock::now();
+    }
+
+    double elapsed() const {
+        auto end_time = std::chrono::steady_clock::now();
+        return std::chrono::duration<double>(end_time - start_time).count();
+    }
+
+    void restart() {
+        start();
+    }
 };
 
 #endif

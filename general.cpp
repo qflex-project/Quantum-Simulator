@@ -564,17 +564,55 @@ int doFullShor(int N, int a){
 	return res;
 }
 
+float doMeasureTest(int qubits, int n_threads) {
+	DGM dgm;
+	dgm.qubits = qubits;
+	dgm.exec_type = t_PAR_CPU;
+ 
+	dgm.n_threads = n_threads;
+	dgm.cpu_region = 12;
+	dgm.cpu_coales = 8;
+	
+	dgm.multi_gpu = 1;
+	dgm.gpu_region = 1;
+	dgm.gpu_coales = 1;
+	dgm.tam_block = 1;
+	dgm.rept = 1;
+
+	dgm.allocateMemory();
+	dgm.setMemoryValue(0);
+
+	string hadamardN = Hadamard(qubits, 0, qubits);
+	dgm.setFunction(hadamardN);
+
+	dgm.execute(1);
+
+	struct timeval timev, tvBegin, tvEnd;
+	gettimeofday(&tvBegin, NULL);
+
+	dgm.measure_parallel(0);
+
+	gettimeofday(&tvEnd, NULL);
+	timeval_subtract(&timev, &tvEnd, &tvBegin);
+	float t = timev.tv_sec + (timev.tv_usec / 1000000.0);
+
+	dgm.freeMemory();
+
+	return t;
+}
+
 int main(int argc, char **argv){
+	/*
 	int n_threads = 1, cpu_region = 14, cpu_coalesc = 11, multi_gpu = 1, gpu_region = 8, gpu_coalesc = 4, tam_block = 64, rept = 2;
 
-	/*
+	
 	int bits = atoi(argv[1]);
 	int N = atoi(argv[2]);
 	int a = atoi(argv[3]);
 	int x = atoi(argv[4]);
 
 	int res = doCU(bits, N, a, x);
-	*/
+	
 
 	int N = atoi(argv[1]);
 	int a = atoi(argv[2]);
@@ -588,6 +626,16 @@ int main(int argc, char **argv){
 
 	for (int i = 0; i < results.size(); i++){
 		cout << "Result: " << results[i] << " - " << revert_bits(results[i], 8) << endl;
+	}
+	*/
+
+	int qubits = atoi(argv[1]);
+	int threads = atoi(argv[2]);
+
+	int num_amostras = 5;
+	for (int i = 0; i < num_amostras; i++){
+		float t = doMeasureTest(qubits, threads);
+		cout << t << endl;
 	}
 
 	return 0;

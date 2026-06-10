@@ -8,7 +8,7 @@
 using namespace std;
 
 
-float Grover(long qubits, long value, int type, int n_threads, int cpu_region, int cpu_coales, int multi_gpu, int gpu_region, int gpu_coales, int tam_block, int rept){
+float Grover(long qubits, long value, int type, int n_threads, int cpu_region, int cpu_coales, int multi_gpu, int gpu_region, int gpu_coales, int tam_block, int rept, int qubits_limit, int global_coales){
 	DGM dgm;
 	dgm.qubits = qubits;
 	dgm.exec_type = type;
@@ -22,6 +22,9 @@ float Grover(long qubits, long value, int type, int n_threads, int cpu_region, i
 	dgm.gpu_coales = gpu_coales;
 	dgm.tam_block = tam_block;
 	dgm.rept = rept;
+
+	dgm.qubits_limit = qubits_limit;
+	dgm.global_coales = global_coales;
 
 	dgm.allocateMemory();
 	dgm.setMemoryValue(1<<(qubits-1));
@@ -46,7 +49,7 @@ float Grover(long qubits, long value, int type, int n_threads, int cpu_region, i
 		grover_step.push_back(Hadamard(qubits, i, 1));
 	}
 
-	int num_of_it = (int) (M_PI/4.0*sqrt(1<<(qubits-1)));
+	int num_of_it = 200; //(int) (M_PI/4.0*sqrt(1<<(qubits-1)));
 	long result = 0;
 
 	dgm.setFunction(H);
@@ -67,6 +70,10 @@ float Grover(long qubits, long value, int type, int n_threads, int cpu_region, i
 	float t = timev.tv_sec + (timev.tv_usec / 1000000.0);
 
 	dgm.freeMemory();
+
+	dgm.printElapsedTimes();
+	//cout << "Total CPU Proj Count: " << dgm.total_cpu_proj_instance_count << endl;
+	//cout << "Total GPU Proj Count: " << dgm.total_gpu_proj_instance_count << endl;
 
 	return t;
 }

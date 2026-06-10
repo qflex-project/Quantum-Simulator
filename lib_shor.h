@@ -11,7 +11,7 @@ using namespace std;
 //N - Number to ne factored
 //type - Execution Type
 //threads - Number of threads to be used in case of a parallel execution on CPU
-vector<int> Shor(long N, int type, int n_threads, int cpu_region, int cpu_coalesc, int multi_gpu, int gpu_region, int gpu_coalesc, int tam_block, int rept);
+vector<int> Shor(long N, int type, int n_threads, int cpu_region, int cpu_coalesc, int multi_gpu, int gpu_region, int gpu_coalesc, int tam_block, int rept, int qubits_limit = 0, int global_coales = 0);
 
 void ApplyQFT(int qubits, int type, int multi_gpu, int qbs_region, int coalesc, int tam_block, int rept);
 
